@@ -1,3 +1,4 @@
+import { plannerURL, projectionBridge } from './firebase/finbuddy.js';
 /**
  * FinVision AI — Application Bootstrap & State Manager
  * ============================================================
@@ -154,6 +155,19 @@ const state = {
    STATE MUTATION & RECALCULATION PIPELINE
 ═════════════════════════════════════════════════════════════ */
 
+const initialState = structuredClone(state);
+const bridge = projectionBridge(() => {
+  const status = document.getElementById('finbuddy-projection-status');
+  if (status) {
+    status.hidden = bridge.status === 'local';
+    status.textContent = bridge.status === 'adopted'
+      ? 'Individual projections use your current FinBuddy goals and SIPs. Household projections use your previous shared plan.'
+      : 'Current planning data is unavailable or loading. Check again before using these projections.';
+  }
+  mountPlanningEditors();
+  recalculate();
+});
+window.addEventListener('focus', bridge.refresh);
 let _recalcTimer = null;
 let _isDirty     = false;
 let _autoSaveTimer = null;
@@ -256,6 +270,10 @@ function cleanupSavingsGoalLinks(activeSavings = [], goals = []) {
  */
 function updateState(patch) {
   const nextPatch = { ...patch };
+  if (bridge.status !== 'local') {
+    delete nextPatch.goals;
+    delete nextPatch.activeSavings;
+  }
 
   if (Object.prototype.hasOwnProperty.call(nextPatch, 'goals')) {
     const nextGoals = nextPatch.goals ?? [];
@@ -331,12 +349,12 @@ function recalculate() {
     // Build the trajectory inputs — individual or household aggregate
     const inputs = (viewMode === 'household' && state.partnerData)
       ? buildHouseholdInputs(state, state.partnerData)
-      : buildPrimaryInputs(state);
+      : bridge.individual(buildPrimaryInputs(state));
 
     state._effectiveInputs = inputs;   // used by UI functions for household-aware display
     state.trajectory    = buildCorpusTrajectory(inputs);
     state.taxComparison = compareTaxRegimes({ ...state.taxInputs, grossSalary: state.monthlyIncome * 12 });
-    state.planHealth    = calculatePlanHealth(state.trajectory, state.goals);
+    state.planHealth    = calculatePlanHealth(state.trajectory, inputs.goals);
 
     // Partner SIPs for goal split chart (only shared items in household view)
     const partnerSavingsForGoals = (viewMode === 'household' && state.partnerData)
@@ -344,8 +362,8 @@ function recalculate() {
       : [];
 
     // Use combined goals from effective inputs so partner's shared goals appear in household view
-    state.goalFunding          = computeSIPGoalFunding(state.activeSavings, inputs.goals, state.planStartYear, partnerSavingsForGoals);
-    state.historicalSIPByAsset = computeHistoricalSIPByAsset(state.activeSavings);
+    state.goalFunding          = computeSIPGoalFunding(viewMode === 'household' ? state.activeSavings : inputs.activeSavings, inputs.goals, state.planStartYear, partnerSavingsForGoals);
+    state.historicalSIPByAsset = computeHistoricalSIPByAsset(viewMode === 'household' ? state.activeSavings : inputs.activeSavings);
 
     // Compute asset drift and rebalancing nudges (only when user has set a target)
     if (state.targetAllocation) {
@@ -356,7 +374,7 @@ function recalculate() {
         cash:       (inputs.currentCash || 0) + (inputs.currentAlternatives || 0),
       };
       state.assetDrift        = calculateAssetDrift(currentForDrift, state.targetAllocation);
-      state.rebalancingNudges = generateRebalancingNudges(state.assetDrift, state.activeSavings);
+      state.rebalancingNudges = generateRebalancingNudges(state.assetDrift, viewMode === 'household' ? state.activeSavings : inputs.activeSavings);
     } else {
       state.assetDrift        = null;
       state.rebalancingNudges = [];
@@ -441,7 +459,7 @@ function updateRebalancingAlerts() {
     list.innerHTML = nudges.map(nudge => `
       <div class="flex items-start gap-2 text-sm rounded-lg bg-amber-500/8 border border-amber-500/20 px-3 py-2">
         <svg class="w-4 h-4 text-amber-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-        <span class="text-slate-300 leading-snug">${nudge}</span>
+        <span class="text-slate-300 leading-snug">${escapeHTML(String(nudge))}</span>
       </div>`).join('');
   }
 
@@ -846,7 +864,7 @@ function updateGoalsPreview() {
     <div class="goal-preview-item flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
       <span class="text-xl">${ICONS[g.type] ?? '🎯'}</span>
       <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium text-white truncate">${g.name}${isPartnerGoal ? ' <span class="text-xs text-blue-400 ml-1">Partner</span>' : ''}</p>
+        <p class="text-sm font-medium text-white truncate">${escapeHTML(String(g.name))}${isPartnerGoal ? ' <span class="text-xs text-blue-400 ml-1">Partner</span>' : ''}</p>
         <p class="text-xs text-slate-400">${g.targetYear ? `${g.targetYear} · ${years}y away` : '–'}</p>
       </div>
       <div class="text-right shrink-0">
@@ -1023,6 +1041,15 @@ async function handleAuthStateChange(user) {
   const guestArea = document.getElementById('auth-guest-area');
   const userArea  = document.getElementById('auth-user-area');
 
+  const previous = state.uid;
+  if (previous && previous !== user?.uid) {
+    detachPartnerListener();
+    Object.assign(state, structuredClone(initialState));
+    delete state._effectiveInputs;
+    _isDirty = false;
+    mountAllForms();
+  }
+  void bridge.switchUser(user);
   if (user) {
     state.uid       = user.uid;
     state.userName  = user.displayName || user.email?.split('@')[0] || 'Investor';
@@ -1042,6 +1069,7 @@ async function handleAuthStateChange(user) {
     // Load previously saved plan data from Firestore
     try {
       const details = await loadPersonalDetails(user.uid);
+      if (state.uid !== user.uid) return;
       if (details) {
         // Restore state fields from saved profile (excluding uid/computed fields)
         const { updatedAt, ...saved } = details;
@@ -1050,6 +1078,7 @@ async function handleAuthStateChange(user) {
         if ((state.linkedAccountIds ?? []).length > 0) {
           try {
             const partnerSnap = await loadPartnerSnapshot(user.uid);
+            if (state.uid !== user.uid) return;
             if (partnerSnap) state.partnerData = partnerSnap;
           } catch (_) { /* non-critical — household view degrades gracefully */ }
           // If the user was in household view, re-attach the real-time listener
@@ -1085,6 +1114,7 @@ async function handleAuthStateChange(user) {
     // Load cached AI summary
     try {
       const cachedSummary = await loadAISummary(user.uid);
+      if (state.uid !== user.uid) return;
       if (cachedSummary) {
         const el = document.getElementById('ai-summary-text');
         if (el) el.textContent = cachedSummary;
@@ -1259,6 +1289,27 @@ function mountTaxInputsForm(container) {
    FORM MOUNTS
 ═════════════════════════════════════════════════════════════ */
 
+function mountPlanningEditors() {
+  const goals = document.getElementById('form-goals');
+  const savings = document.getElementById('form-savings');
+  if (!goals || !savings) return;
+  if (bridge.status === 'local') {
+    const change = (field, value) => updateState({ [field]: value });
+    mountGoalsForm(goals, state, change);
+    mountSavingsForm(savings, state, change);
+    return;
+  }
+  for (const container of [goals, savings]) {
+    const label = document.createElement('p');
+    label.textContent = bridge.status === 'adopted' ? 'You manage your goals and recurring investments in FinBuddy.' : 'Checking where your plan is managed. Reopen this tab to retry.';
+    const link = document.createElement('a');
+    link.href = plannerURL;
+    link.className = 'btn-primary';
+    link.textContent = 'Open FinBuddy goals';
+    container.replaceChildren(label, link);
+  }
+}
+
 function mountAllForms() {
   const container = (id) => document.getElementById(id);
 
@@ -1277,13 +1328,7 @@ function mountAllForms() {
     updateState({ [field]: value });
   });
 
-  mountGoalsForm(container('form-goals'), state, (field, value) => {
-    updateState({ [field]: value });
-  });
-
-  mountSavingsForm(container('form-savings'), state, (field, value) => {
-    updateState({ [field]: value });
-  });
+  mountPlanningEditors();
 
   mountLiabilitiesForm(container('form-liabilities'), state, (field, value) => {
     updateState({ [field]: value });
@@ -1482,6 +1527,7 @@ function bindEvents() {
 
   // ── CSV Export ─────────────────────────────────────────────
   document.getElementById('btn-export-csv')?.addEventListener('click', () => {
+    if (bridge.status !== 'local') { showToast('Export of FinBuddy-linked projections is paused during the pilot.', 'info'); return; }
     if (state.trajectory.length > 0) {
       exportCSV(state.trajectory);
     } else {
@@ -1491,6 +1537,7 @@ function bindEvents() {
 
   // ── PDF Download ───────────────────────────────────────────
   document.getElementById('btn-download-pdf')?.addEventListener('click', async () => {
+    if (bridge.status !== 'local') { showToast('Export of FinBuddy-linked projections is paused during the pilot.', 'info'); return; }
     const options = {
       title:          document.getElementById('report-title')?.value || APP.NAME,
       preparedFor:    document.getElementById('report-name')?.value || state.userName,
@@ -1531,6 +1578,7 @@ function bindEvents() {
 
   async function sendAIMessage() {
     const input = document.getElementById('ai-chat-input');
+    if (bridge.status !== 'local') { showToast('AI is paused for FinBuddy-linked planning data.', 'info'); return; }
     const msg   = input?.value.trim();
     if (!msg) return;
 
@@ -1568,6 +1616,7 @@ function bindEvents() {
   // Generate AI Summary
   document.getElementById('btn-generate-ai-summary')?.addEventListener('click', async () => {
     const btn     = document.getElementById('btn-generate-ai-summary');
+    if (bridge.status !== 'local') { showToast('AI summaries are paused for FinBuddy-linked planning data.', 'info'); return; }
     const textEl  = document.getElementById('ai-summary-text');
     if (!btn || !textEl) return;
 
@@ -1615,11 +1664,10 @@ function bindEvents() {
         monthlyMedicalPremium: state.monthlyMedicalPremium,
         monthlyEMI: state.monthlyEMI,
         expenseCategories: state.expenseCategories,
-        goals: state.goals,
-        activeSavings: state.activeSavings ?? [],
+        ...bridge.legacyFields(state.goals, state.activeSavings ?? [], state.planHealth),
         liabilities: state.liabilities ?? [],
         taxInputs: state.taxInputs,
-        planHealth: state.planHealth,
+
         linkedAccountIds: state.linkedAccountIds ?? [],
         viewMode: state.viewMode ?? 'individual',
         shareAssets: state.shareAssets !== false,
@@ -1649,10 +1697,9 @@ function bindEvents() {
         currentEquity: state.currentEquity, currentDebt: state.currentDebt,
         currentEPF: state.currentEPF, monthlyExpenses: state.monthlyExpenses,
         monthlyMedicalPremium: state.monthlyMedicalPremium, monthlyEMI: state.monthlyEMI,
-        retirementAge: state.retirementAge, goals: state.goals,
-        activeSavings: state.activeSavings ?? [],
+        retirementAge: state.retirementAge, ...bridge.legacyFields(state.goals, state.activeSavings ?? [], state.planHealth),
         liabilities: state.liabilities ?? [],
-        taxInputs: state.taxInputs, planHealth: state.planHealth,
+        taxInputs: state.taxInputs,
       });
       showToast('Plan saved to cloud ✓', 'success');
     } catch (err) {
@@ -2044,11 +2091,10 @@ function initApp() {
       monthlyMedicalPremium: state.monthlyMedicalPremium,
       monthlyEMI: state.monthlyEMI,
       expenseCategories: state.expenseCategories,
-      goals: state.goals,
-      activeSavings: state.activeSavings ?? [],
+      ...bridge.legacyFields(state.goals, state.activeSavings ?? [], state.planHealth),
       liabilities: state.liabilities ?? [],
       taxInputs: state.taxInputs,
-      planHealth: state.planHealth,
+
       linkedAccountIds: state.linkedAccountIds ?? [],
       viewMode: state.viewMode ?? 'individual',
       shareAssets: state.shareAssets !== false,

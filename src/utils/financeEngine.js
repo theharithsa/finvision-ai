@@ -127,7 +127,7 @@ function computeEffectiveRatesByAssetClass(activeSavings, inflationRate) {
     const cls    = sip.assetClass;
     if (!cls || !acc[cls]) continue;
     const weight = sip.monthlyAmount > 0 ? sip.monthlyAmount : 0;
-    const rate   = (sip.annualRate && sip.annualRate > 0)
+    const rate   = (Number.isFinite(sip.annualRate) && sip.annualRate >= 0)
       ? sip.annualRate
       : sipRate(sip.type);
     acc[cls].weightedSum += rate * weight;
@@ -267,7 +267,7 @@ export function buildCorpusTrajectory(inputs) {
           if (months === 0) return acc;
 
           const principal = sip.monthlyAmount * months;
-          const rate = (sip.annualRate && sip.annualRate > 0) ? sip.annualRate : sipRate(sip.type);
+          const rate = (Number.isFinite(sip.annualRate) && sip.annualRate >= 0) ? sip.annualRate : sipRate(sip.type);
           const futureValue = sipFutureValue(sip.monthlyAmount, rate, months);
 
           acc.principal += principal;
@@ -280,7 +280,7 @@ export function buildCorpusTrajectory(inputs) {
           if (months === 0) return acc;
 
           const principal = sip.monthlyAmount * months;
-          const rate = (sip.annualRate && sip.annualRate > 0) ? sip.annualRate : sipRate(sip.type);
+          const rate = (Number.isFinite(sip.annualRate) && sip.annualRate >= 0) ? sip.annualRate : sipRate(sip.type);
           const futureValue = sipFutureValue(sip.monthlyAmount, rate, months);
 
           acc.principal += principal;
@@ -362,7 +362,7 @@ export function computeHistoricalSIPByAsset(activeSavings = []) {
     if (effectiveEndMonths <= sipStartMonths) continue;
 
     const months = effectiveEndMonths - sipStartMonths;
-    const rate   = (sip.annualRate && sip.annualRate > 0) ? sip.annualRate : sipRate(sip.type);
+    const rate   = (Number.isFinite(sip.annualRate) && sip.annualRate >= 0) ? sip.annualRate : sipRate(sip.type);
     const fv     = sipFutureValue(sip.monthlyAmount, rate, months);
     weightedAnnualReturn += fv * rate;
 
@@ -496,7 +496,7 @@ export function computeSIPGoalFunding(activeSavings = [], goals = [], planStartY
     if (months <= 0) return;
 
     // Use user-supplied rate if set, otherwise default to type rate
-    const rate = (sip.annualRate && sip.annualRate > 0) ? sip.annualRate : sipRate(sip.type);
+    const rate = (Number.isFinite(sip.annualRate) && sip.annualRate >= 0) ? sip.annualRate : sipRate(sip.type);
     const fv   = sipFutureValue(sip.monthlyAmount, rate, months);
 
     const goalId = (sip.linkType === 'goal' && sip.linkedGoalId) ? sip.linkedGoalId : 'unlinked';
@@ -539,7 +539,7 @@ export function computeSIPGoalFunding(activeSavings = [], goals = [], planStartY
     const months = Math.max(0, (endY - startY) * 12 + (endM - startM));
     if (months <= 0) return;
 
-    const rate = (sip.annualRate && sip.annualRate > 0) ? sip.annualRate : sipRate(sip.type);
+    const rate = (Number.isFinite(sip.annualRate) && sip.annualRate >= 0) ? sip.annualRate : sipRate(sip.type);
     const fv   = sipFutureValue(sip.monthlyAmount, rate, months);
 
     const goalId = (sip.linkType === 'goal' && sip.linkedGoalId) ? sip.linkedGoalId : 'unlinked';
