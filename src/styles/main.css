@@ -1464,3 +1464,7 @@ html.light .border-white\/10.rounded-lg { border-color: oklch(0 0 0 / 0.09) !imp
   .health-bar-fill,
   .goal-progress-fill         { transition: none !important; }
 }
+
+#view-mode-toggle[hidden] {
+  display: none;
+}

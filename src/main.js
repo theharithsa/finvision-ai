@@ -1825,7 +1825,7 @@ function updateViewModeUI() {
   const hasPartner = !!state.partnerData;
 
   // Show nav toggle only when a partner account is linked
-  if (toggle) toggle.classList.toggle('hidden', !hasPartner);
+  if (toggle) toggle.hidden = !hasPartner;
 
   // Sync button active states
   const mode = state.viewMode ?? 'individual';
