@@ -16,6 +16,7 @@ test('individual projection and handoff are private, refreshable and fail closed
   await b.switchUser(user);
   assert.deepEqual(b.individual(legacy).goals, projection.goals);
   assert.deepEqual(legacy.goals, []);
+  assert.deepEqual(b.individual(legacy, 'household'), legacy);
   assert.deepEqual(b.legacyFields([], [], 91), {});
   result = { ...projection, goals: [{id:'updated'}] };
   await b.refresh();
