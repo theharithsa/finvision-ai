@@ -31,7 +31,7 @@ export function projectionBridge(onChange) {
       await refresh();
     },
     refresh,
-    individual(inputs) { return state.projection ? { ...inputs, ...state.projection } : inputs; },
+    individual(inputs, viewMode = 'individual') { return viewMode === 'individual' && state.projection ? { ...inputs, ...state.projection } : inputs; },
     legacyFields(goals, activeSavings, planHealth) {
       return state.status === 'local' ? { goals, activeSavings, planHealth } : {};
     },

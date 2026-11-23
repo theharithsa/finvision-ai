@@ -349,7 +349,7 @@ function recalculate() {
     // Build the trajectory inputs — individual or household aggregate
     const inputs = (viewMode === 'household' && state.partnerData)
       ? buildHouseholdInputs(state, state.partnerData)
-      : bridge.individual(buildPrimaryInputs(state));
+      : bridge.individual(buildPrimaryInputs(state), viewMode);
 
     state._effectiveInputs = inputs;   // used by UI functions for household-aware display
     state.trajectory    = buildCorpusTrajectory(inputs);
