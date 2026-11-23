@@ -24,6 +24,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Planning handoff checks
+        run: node --test tests/finbuddy.test.js
+
       - name: Production build
         run: npm run build
         env:
